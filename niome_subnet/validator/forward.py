@@ -155,11 +155,29 @@ async def run_validation(self):
                     f"Validator fault while scoring uid {uid}; abandoning this "
                     f"round without setting weights", exc_info=True)
                 return
-            except:
+            except Exception as exc:
+                # One miner's submission failed to score. That miner scores zero
+                # (a fair result), but the failure must stay observable instead
+                # of being swallowed by a bare `except`.
+                logger.warning(
+                    f"Scoring failed for uid {uid}: {type(exc).__name__}: {exc}"
+                )
                 continue
 
         valid_scores = [score for score in scores if score.final_score > 0]
         logger.info(f"Scores: {valid_scores}")
+
+        if not valid_scores:
+            # No miner produced a positive score this round. Calling set_weights
+            # now would publish an owner-only weight vector (see
+            # process_weights_for_netuid) and erase every miner's weight, which
+            # is worse than committing nothing. Keep the previously-committed
+            # weights and skip the round instead.
+            logger.warning(
+                "No positive scores this round; skipping set_weights to preserve "
+                "the previous on-chain weights."
+            )
+            return
 
         self.set_weights(scores, self.task_id)
         valid_uids = [
